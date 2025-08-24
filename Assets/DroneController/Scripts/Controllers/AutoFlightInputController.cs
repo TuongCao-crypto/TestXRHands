@@ -12,131 +12,165 @@ public class AutoFlightInputController : MonoBehaviour
         Success
     }
 
-    public Transform target; // Target position to fly towards
-    private Vector3 targetPosition;
-    private Vector3 originalPosition;
+    private FlightInputChannel _chan;
 
-    public float hoverHeight = 1.5f; // Height to reach, then hold
-    public float maxPitch = 1f;
+    [Header("Targets")] public Transform target; // world-space target (Data vault, etc.)
+
+    [Header("Heights & Arrival")] public float hoverHeight = 1.5f; // desired altitude
+    public float hoverTolerance = 0.1f;
+    public float arriveRadiusTarget = 0.25f; // planar radius to consider "at target"
+    public float arriveRadiusHome = 0.35f; // planar radius to consider "back home"
+
+    [Header("Inputs (Limits)")] public float maxPitch = 1f;
     public float maxRoll = 1f;
     public float maxYaw = 1f;
-    public float throttle = 9.8f; // Base upward force to climb to hover height
 
-    public float pitchSensitivity = 2f;
+    [Header("Sensitivities")] public float pitchSensitivity = 2f;
     public float rollSensitivity = 2f;
-    public float yawSensitivity = 1f;
+    public float yawSensitivity = 1f; // currently unused (kept for future tuning)
 
-    public float hoverTolerance = 0.1f; // Height tolerance to consider "at hover height"
+    [Header("Altitude Hold")] public float throttleBase = 9.8f; // base upward force
+    public float throttleP = 0.5f; // proportional gain to hold height
+    public float throttleClampMax = 20f;
+
+    [Header("Hover Pause")] public float hoverPauseSeconds = 2f;
 
     private DroneMovement droneMotor;
+    private Vector3 originalPosition;
     private bool hoveringComplete = false;
-    private float hoverTime = 2f;
+    private float hoverTime;
 
     private EFlightStage _flightStage = EFlightStage.Off;
+
+    private void SetInputs(float p, float r, float y, float t)
+    {
+        if (_chan != null)
+        {
+            _chan.Pitch = p;
+            _chan.Roll = r;
+            _chan.Yaw = y;
+            _chan.Throttle = t;
+        }
+    }
+
+    private void SetInputs(float p, float r, float y)
+    {
+        if (_chan != null)
+        {
+            _chan.Pitch = p;
+            _chan.Roll = r;
+            _chan.Yaw = y;
+        }
+    }
+
+    private void SetInputs(float t)
+    {
+        if (_chan != null)
+        {
+            _chan.Throttle = t;
+        }
+    }
 
     void Start()
     {
         droneMotor = GetComponent<DroneMovement>();
-        targetPosition = target.position - transform.position;
+        _chan = GetComponent<FlightInputChannel>();
         originalPosition = transform.position;
+        hoverTime = hoverPauseSeconds;
     }
 
     void FixedUpdate()
     {
-        if (droneMotor == null || InputManager.Instance == null) return;
-        // Drone must be powered on (any state except Off)
-        if (droneMotor.CurrentState == DroneState.Off) return;
+        if (droneMotor == null || droneMotor.CurrentState == DroneState.Off) return;
 
+        // Stop all angular inputs if Success
         if (_flightStage == EFlightStage.Success)
         {
-            InputManager.Instance.PitchInput = 0f;
-            InputManager.Instance.RollInput = 0f;
-            InputManager.Instance.YawInput = 0f;
+            SetInputs(0, 0, 0, 0);
             return;
         }
 
-        // --- Step 1: Climb to hoverHeight ---
+        // --- Altitude control (always on) ---
         float currentHeight = transform.position.y;
         float heightError = hoverHeight - currentHeight;
+        float holdThrottle = throttleBase + heightError * throttleP;
+        SetInputs(Mathf.Clamp(holdThrottle, 0f, throttleClampMax));
 
+        // --- Step 1: climb to hoverHeight ---
         if (!hoveringComplete)
         {
-            // Drive up/down until we reach hoverHeight within tolerance
-            float climbThrottle = throttle + heightError * 0.5f; // Gain for faster convergence
-            InputManager.Instance.ThrottleInput = Mathf.Clamp(climbThrottle, 0f, 20f);
-
-            // No lateral motion while climbing
-            InputManager.Instance.PitchInput = 0f;
-            InputManager.Instance.RollInput = 0f;
-            InputManager.Instance.YawInput = 0f;
+            // Freeze lateral while acquiring hover altitude
+            SetInputs(0, 0, 0);
 
             if (Mathf.Abs(heightError) <= hoverTolerance)
             {
                 hoveringComplete = true;
-                Debug.Log("AutoFlightInputController: Hover over climb threshold exceeded");
                 _flightStage = EFlightStage.MoveToData;
+                Debug.Log("AutoFlight: reached hover band, preparing to move");
             }
+
             return;
         }
 
-        // Hover 2s prepare for move to target
-        if (hoverTime > 0)
+        // --- Optional hover pause before moving ---
+        if (hoverTime > 0f)
         {
             hoverTime -= Time.fixedDeltaTime;
-            InputManager.Instance.ThrottleInput = 0;
+            // Keep altitude via holdThrottle; no lateral motion
+            SetInputs(0, 0, 0);
             return;
         }
 
-        // --- Step 2: Hold altitude (zero throttle) & move toward target ---
-        // Per requirement: once at hoverHeight, keep throttle = 0 and only steer to target.
+        // --- Step 2: steer towards target/home (planar) ---
+        Vector3 dest =
+            (_flightStage == EFlightStage.MoveToData)
+                ? (target != null ? target.position : transform.position)
+                : originalPosition;
 
-        Vector3 planarToTarget = new Vector3(targetPosition.x, 0f, targetPosition.z);
+        Vector3 toDest = dest - transform.position;
+        Vector3 planar = new Vector3(toDest.x, 0f, toDest.z);
+        float arriveRadius = (_flightStage == EFlightStage.MoveToData) ? arriveRadiusTarget : arriveRadiusHome;
 
-        if (planarToTarget.sqrMagnitude < 0.001f)
+        if (planar.sqrMagnitude <= arriveRadius * arriveRadius)
         {
-            InputManager.Instance.PitchInput = 0f;
-            InputManager.Instance.RollInput = 0f;
-            InputManager.Instance.YawInput = 0f;
-            Debug.Log(gameObject.name + "Hit target");
+            // Reached planar destination for current leg
+            if (_flightStage == EFlightStage.BackHome)
+            {
+                SetInputs(0, 0, 0);
+                _flightStage = EFlightStage.Success;
+                Debug.Log($"{gameObject.name}: Success (home reached)");
+            }
+            else
+            {
+                // At/near Data area; usually OnTriggerEnter will fire to switch stage
+                // Keep gentle stop here to avoid overshoot
+                SetInputs(0, 0, 0);
+                // Note: do NOT change stage here; wait for trigger "Data"
+            }
+
             return;
         }
 
-        //Move to target
-        Vector3 localDirPlanar = transform.InverseTransformDirection(planarToTarget.normalized);
+        // Compute steering using current vector each frame
+        Vector3 localDirPlanar = transform.InverseTransformDirection(planar.normalized);
+
         float pitch = Mathf.Clamp(localDirPlanar.z * pitchSensitivity, -maxPitch, maxPitch);
         float roll = Mathf.Clamp(localDirPlanar.x * rollSensitivity, -maxRoll, maxRoll);
-        float angleToTarget = Vector3.SignedAngle(
-            transform.forward,
-            planarToTarget.normalized,
-            Vector3.up
-        );
-        float yaw = Mathf.Clamp(angleToTarget / 45f, -1f, 1f) * maxYaw;
 
-        if (yaw > 0.01f)
+        float angleToDest = Vector3.SignedAngle(transform.forward, planar.normalized, Vector3.up);
+        float yaw = Mathf.Clamp(angleToDest / 45f, -1f, 1f) * maxYaw;
+
+        // If turning significantly, temporarily trim pitch/roll to reduce skids
+        if (Mathf.Abs(yaw) > 0.01f)
         {
-            if (pitch > 0) pitch -= Time.fixedDeltaTime * 10f;
-            if (pitch < 0) pitch = 0;
-
-            if (roll > 0) roll -= Time.fixedDeltaTime * 10f;
-            if (roll < 0) roll = 0;
-
+            float trim = 10f * Time.fixedDeltaTime;
+            if (pitch > 0f) pitch = Mathf.Max(0f, pitch - trim);
+            if (pitch < 0f) pitch = Mathf.Min(0f, pitch + trim);
+            if (roll > 0f) roll = Mathf.Max(0f, roll - trim);
+            if (roll < 0f) roll = Mathf.Min(0f, roll + trim);
         }
-
-        if (_flightStage == EFlightStage.BackHome && AreVectorsEqual(originalPosition, transform.position))
-        {
-            InputManager.Instance.PitchInput = 0;
-            InputManager.Instance.RollInput = 0;
-            InputManager.Instance.YawInput = 0;
-            InputManager.Instance.ThrottleInput = 0;
-            _flightStage = EFlightStage.Success;
-            Debug.Log(gameObject.name + ": Success!");
-        }
-        else
-        {
-            InputManager.Instance.PitchInput = pitch;
-            InputManager.Instance.RollInput = roll;
-            InputManager.Instance.YawInput = yaw;
-        }
+      
+        SetInputs(pitch, roll, yaw, 0);
     }
 
     private void OnTriggerEnter(Collider other)
@@ -144,14 +178,9 @@ public class AutoFlightInputController : MonoBehaviour
         if (other.CompareTag("Data"))
         {
             Debug.Log("Collected Data");
-            targetPosition = originalPosition - transform.position;
+            // deactivate data and head home
             other.gameObject.SetActive(false);
             _flightStage = EFlightStage.BackHome;
         }
-    }
-
-    private bool AreVectorsEqual(Vector3 v1, Vector3 v2, float tolerance = 1f)
-    {
-        return Vector3.Distance(new Vector3(v1.x, 0, v1.z), new Vector3(v2.x, 0, v2.z)) <= tolerance;
     }
 }

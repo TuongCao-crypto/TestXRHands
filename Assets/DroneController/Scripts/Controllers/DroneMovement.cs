@@ -33,8 +33,13 @@ namespace DroneController
     public class DroneMovement : MonoBehaviour
     {
         public delegate void OnStateChangedDelegate(DroneState newState);
-
         public event OnStateChangedDelegate OnStateChanged;
+        
+        private FlightInputChannel inputChannel;
+        float ReadPitch()    => inputChannel ? inputChannel.Pitch    : InputManager.Instance.PitchInput;
+        float ReadRoll()     => inputChannel ? inputChannel.Roll     : InputManager.Instance.RollInput;
+        float ReadYaw()      => inputChannel ? inputChannel.Yaw      : InputManager.Instance.YawInput;
+        float ReadThrottle() => inputChannel ? inputChannel.Throttle : InputManager.Instance.ThrottleInput;
 
 
         [Header("Project References:")] [SerializeField]
@@ -45,7 +50,6 @@ namespace DroneController
 
         // Component renferences.
         private Rigidbody _rigidbody = default;
-        private InputManager _inputManager = default;
 
         // Calculation values.
         private Vector3 _smoothDampToStopVelocity = default;
@@ -77,21 +81,7 @@ namespace DroneController
         {
             get { return _currentState; }
         }
-
-        // Private properties.
-        public InputManager InputManager
-        {
-            get
-            {
-                if (_inputManager == null)
-                {
-                    _inputManager = InputManager.Instance;
-                }
-
-                return _inputManager;
-            }
-        }
-
+        
         private Vector3 startPosition = Vector3.zero;
         private Vector3 startRotation = Vector3.zero;
         private Vector3 homePosition = Vector3.zero;
@@ -113,6 +103,7 @@ namespace DroneController
             _rigidbody.mass = _droneMovementData.Mass;
             _animator = GetComponentInChildren<Animator>();
             _animator.enabled = false;
+            inputChannel = GetComponent<FlightInputChannel>();
         }
 
         protected virtual void Start()
@@ -199,10 +190,10 @@ namespace DroneController
 
             ClampingSpeedValues();
 
-            ThrottleForce(InputManager.ThrottleInput);
-            RollForce(InputManager.RollInput);
-            YawForce(InputManager.YawInput);
-            PitchForce(InputManager.PitchInput);
+            ThrottleForce(ReadThrottle());
+            RollForce(ReadRoll());
+            YawForce(ReadYaw());
+            PitchForce(ReadPitch());
 
             ApplyForces();
 
@@ -221,7 +212,7 @@ namespace DroneController
 
             if (_currentState == DroneState.PrepareAutoLanding)
             {
-                if (InputManager.ThrottleInput < 0)
+                if (ReadThrottle() < 0)
                 {
                     _landingDelay -= Time.deltaTime;
                     if (_landingDelay <= 0)
@@ -244,7 +235,7 @@ namespace DroneController
 
             if (_currentState == DroneState.ReadyTOFlying || _currentState == DroneState.PrepareAutoLanding)
             {
-                if (InputManager.ThrottleInput > 0)
+                if (ReadThrottle() > 0)
                 {
                     SwitchState(DroneState.Flying);
                     _animator.enabled = true;
@@ -258,8 +249,8 @@ namespace DroneController
 
             ClampingSpeedValues();
 
-            float absThrottle = Mathf.Abs(InputManager.ThrottleInput);
-            float absYaw = Mathf.Abs(InputManager.YawInput);
+            float absThrottle = Mathf.Abs(ReadThrottle());
+            float absYaw = Mathf.Abs(ReadYaw());
             bool bothInputsActive = absThrottle > 0.01f && absYaw > 0.01f;
 
             if (bothInputsActive)
@@ -268,29 +259,29 @@ namespace DroneController
                 if (absThrottle > absYaw)
                 {
                     // Prioritize throttle - zero out roll
-                    ThrottleForce(InputManager.ThrottleInput);
+                    ThrottleForce(ReadThrottle());
                     YawForce(0);
                 }
                 else if (absYaw > absThrottle)
                 {
                     // Prioritize roll - zero out throttle
                     ThrottleForce(0);
-                    YawForce(InputManager.YawInput);
+                    YawForce(ReadYaw());
                 }
                 else
                 {
-                    ThrottleForce(InputManager.ThrottleInput);
-                    YawForce(InputManager.YawInput);
+                    ThrottleForce(ReadThrottle());
+                    YawForce(ReadYaw());
                 }
             }
             else
             {
-                ThrottleForce(InputManager.ThrottleInput);
-                YawForce(InputManager.YawInput);
+                ThrottleForce(ReadThrottle());
+                YawForce(ReadYaw());
             }
 
-            RollForce(InputManager.RollInput);
-            PitchForce(InputManager.PitchInput);
+            RollForce(ReadRoll());
+            PitchForce(ReadPitch());
 
             ApplyForces();
         }
@@ -419,62 +410,62 @@ namespace DroneController
         {
             //if(GameManager.Instance.IsEditingMode) return;
 
-            //V down
-            if (InputManager.LeftJoyStickInput.y < 0 && InputManager.LeftJoyStickInput.x < 0)
-            {
-                if (InputManager.RightJoyStickInput.y < 0 && InputManager.RightJoyStickInput.x > 0)
-                {
-                    _timeStartEngine -= Time.fixedDeltaTime;
-                    if (_timeStartEngine <= 0)
-                    {
-                        InputManagerOnStartEnginePressed();
-                        _timeStartEngine = 2;
-                    }
-                }
-            }
-
-            // V UP
-            if (InputManager.LeftJoyStickInput.y < 0 && InputManager.LeftJoyStickInput.x > 0)
-            {
-                if (InputManager.RightJoyStickInput.y < 0 && InputManager.RightJoyStickInput.x < 0)
-                {
-                    _timeStartEngine -= Time.fixedDeltaTime;
-                    if (_timeStartEngine <= 0)
-                    {
-                        InputManagerOnStartEnginePressed();
-                        _timeStartEngine = 2;
-                    }
-                }
-            }
+            // //V down
+            // if (InputManager.LeftJoyStickInput.y < 0 && InputManager.LeftJoyStickInput.x < 0)
+            // {
+            //     if (InputManager.RightJoyStickInput.y < 0 && InputManager.RightJoyStickInput.x > 0)
+            //     {
+            //         _timeStartEngine -= Time.fixedDeltaTime;
+            //         if (_timeStartEngine <= 0)
+            //         {
+            //             InputManagerOnStartEnginePressed();
+            //             _timeStartEngine = 2;
+            //         }
+            //     }
+            // }
+            //
+            // // V UP
+            // if (InputManager.LeftJoyStickInput.y < 0 && InputManager.LeftJoyStickInput.x > 0)
+            // {
+            //     if (InputManager.RightJoyStickInput.y < 0 && InputManager.RightJoyStickInput.x < 0)
+            //     {
+            //         _timeStartEngine -= Time.fixedDeltaTime;
+            //         if (_timeStartEngine <= 0)
+            //         {
+            //             InputManagerOnStartEnginePressed();
+            //             _timeStartEngine = 2;
+            //         }
+            //     }
+            // }
         }
 
         private void CheckHorverLanding()
         {
-            if (Physics.Raycast(transform.position, Vector3.down, out RaycastHit hit, 5f))
-            {
-                if (hit.collider.gameObject.layer != LayerMask.NameToLayer("Ground"))
-                {
-                    return;
-                }
-
-                if (_currentState == DroneState.Flying && hit.distance < safeHeight && InputManager.ThrottleInput <= 0)
-                {
-                    SwitchState(DroneState.HorverLanding);
-                }
-                else if (_currentState == DroneState.HorverLanding && hit.distance >= safeHeight)
-                {
-                    SwitchState(DroneState.PrepareAutoLanding);
-                }
-
-                if (_currentState == DroneState.HorverLanding)
-                {
-                    currentHeight = hit.distance;
-                    descentSpeed = _rigidbody.linearVelocity.y;
-                    _opposingForceHover = -(descentSpeed) * kSpeed + (safeHeight - currentHeight) * kHeight;
-                    ThrottleForce(_opposingForceHover);
-                    ApplyForces();
-                }
-            }
+            // if (Physics.Raycast(transform.position, Vector3.down, out RaycastHit hit, 5f))
+            // {
+            //     if (hit.collider.gameObject.layer != LayerMask.NameToLayer("Ground"))
+            //     {
+            //         return;
+            //     }
+            //
+            //     if (_currentState == DroneState.Flying && hit.distance < safeHeight && InputManager.ThrottleInput <= 0)
+            //     {
+            //         SwitchState(DroneState.HorverLanding);
+            //     }
+            //     else if (_currentState == DroneState.HorverLanding && hit.distance >= safeHeight)
+            //     {
+            //         SwitchState(DroneState.PrepareAutoLanding);
+            //     }
+            //
+            //     if (_currentState == DroneState.HorverLanding)
+            //     {
+            //         currentHeight = hit.distance;
+            //         descentSpeed = _rigidbody.linearVelocity.y;
+            //         _opposingForceHover = -(descentSpeed) * kSpeed + (safeHeight - currentHeight) * kHeight;
+            //         ThrottleForce(_opposingForceHover);
+            //         ApplyForces();
+            //     }
+            // }
         }
 
         public float GetHeightVelocity()
