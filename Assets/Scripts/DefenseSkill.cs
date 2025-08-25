@@ -3,65 +3,73 @@ using System.Collections;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
-using Oculus.Interaction;          // ActiveStateSelector
-using Oculus.Interaction.Input;    // IHmd, HandRef
+using Oculus.Interaction; // ActiveStateSelector
+using Oculus.Interaction.Input; // IHmd, HandRef
 
 public class DefenseSkill : MonoBehaviour
 {
-    private const int PAPER_LEFT_INDEX = 0; // paper pose: attack beam
-    private const int PAPER_RIGHT_INDEX = 1; // paper pose: attack beam
-    private const int STOP_LEFT_INDEX  = 2; // stop pose : freeze
-    private const int STOP_RIGHT_INDEX  = 3; // stop pose : freeze
+    private const int PAPER_LEFT_INDEX = 0; // paper pose: attack beam (left)
+    private const int PAPER_RIGHT_INDEX = 1; // paper pose: attack beam (right)
+    private const int STOP_LEFT_INDEX = 2; // stop pose: freeze (left)
+    private const int STOP_RIGHT_INDEX = 3; // stop pose: freeze (right)
 
-    [Header("XR")]
-    [SerializeField, Interface(typeof(IHmd))]
+    [Header("XR")] [SerializeField, Interface(typeof(IHmd))]
     private UnityEngine.Object _hmd;
+
     private IHmd Hmd { get; set; }
 
-    [Header("Poses (size=2: [0]=Paper, [1]=Stop)")]
-    [SerializeField] private ActiveStateSelector[] _poses;     // 0: paper, 1: stop
-    [SerializeField] private Material[] _onSelectIcons;        // icon gắn vào prefab visual (optional)
+    [Header("Poses (size=4: 0=PaperL,1=PaperR,2=StopL,3=StopR)")] [SerializeField]
+    private ActiveStateSelector[] _poses; // 0: paperL, 1: paperR, 2: stopL, 3: stopR
+
+    [SerializeField] private Material[] _onSelectIcons; // optional icon material for the visual prefab
     [SerializeField] private GameObject _poseActiveVisualPrefab;
 
     private GameObject[] _poseActiveVisuals;
 
-    [Header("Raycast/Hit Settings")]
-    [SerializeField] private LayerMask droneLayerMask = ~0;  // set layer Drone trong Inspector
-    [SerializeField] private float raySphereRadius = 0.06f;  // SphereCast để dễ trúng hơn
-    [SerializeField] private float maxRayDistance = 10f;     // beam bay thẳng 10m nếu không trúng
+    [Header("Raycast / Hit Settings")] [SerializeField]
+    private LayerMask droneLayerMask = ~0; // set Drone layer here
+
+    [SerializeField] private float raySphereRadius = 0.06f; // SphereCast radius to make hits easier
+    [SerializeField] private float maxRayDistance = 10f; // if miss, beam extends straight to this distance
     [SerializeField] private QueryTriggerInteraction triggerInteraction = QueryTriggerInteraction.Ignore;
 
-    [Header("Paper (Attack)")]
-    [SerializeField] private float paperDamage = 1f;
-    const float startOffsetMeters = 0.30f; 
+    [Header("Paper (Attack)")] [SerializeField]
+    private float paperDamage = 1f;
 
-    [Header("Stop (Freeze)")]
-    [SerializeField] private float stopDamage = 1f;
+    const float startOffsetMeters = 0.30f; // beam starts 30 cm from the hand/palm along the firing direction
+
+    [Header("Stop (Freeze)")] [SerializeField]
+    private float stopDamage = 1f;
+
     [SerializeField] private float freezeSeconds = 2f;
-    [Header("Palm Aim")]
-    [SerializeField] private bool invertPalmForward = false;
 
-    [Header("Beam FX (pooled)")]
-    [SerializeField] private GameObject beamPrefab;   // prefab có LineRenderer
+    [Header("Palm Aim")] [SerializeField]
+    private bool invertPalmForward = false; // flip palm firing direction if your rig's normal is reversed
+
+    [Header("Beam FX (Pooled)")] [SerializeField]
+    private GameObject beamPrefab; // prefab containing a LineRenderer (optional)
+
     [SerializeField] private int beamPoolSize = 8;
     [SerializeField] private float beamWidth = 0.02f;
     [SerializeField] private float beamLifetime = 0.12f;
 
-    [Header("Stability")]
-    [SerializeField] private float retriggerCooldown = 0.25f; // chống flicker pose spam
-    [SerializeField] private bool  debugLogs = false;
+    [Header("Stability")] [SerializeField]
+    private float retriggerCooldown = 0.25f; // debounce to avoid pose flicker spam
+
+    [SerializeField] private bool debugLogs = false;
 
     // --- runtime ---
     private readonly List<Action> _subsOnSelected = new();
     private readonly List<Action> _subsOnUnselected = new();
-    private float[] _lastCastTimes;   // per pose cooldown
+    private float[] _lastCastTimes; // per-pose cooldown registry
     private Queue<LineRenderer> _beamPool;
-    
-    [Header("Editor Test")]
-    [SerializeField] private bool editorTestMode = true;     // bật/tắt test trong Editor
-    [SerializeField] private KeyCode paperKey = KeyCode.Mouse0; // chuột trái = Paper (Attack)
-    [SerializeField] private KeyCode stopKey  = KeyCode.Mouse1; // chuột phải = Stop (Freeze)
-    [SerializeField] private Transform editorAimSource;       // nếu để trống sẽ dùng Camera.main
+
+    [Header("Editor Test")] [SerializeField]
+    private bool editorTestMode = true; // enable keyboard/mouse testing in Editor
+
+    [SerializeField] private KeyCode paperKey = KeyCode.Mouse0; // LMB = Paper (Attack)
+    [SerializeField] private KeyCode stopKey = KeyCode.Mouse1; // RMB = Stop (Freeze)
+    [SerializeField] private Transform editorAimSource; // if null uses Camera.main
     [SerializeField] private bool useCameraWhenNoAimSource = true;
 
     protected virtual void Awake()
@@ -71,18 +79,18 @@ public class DefenseSkill : MonoBehaviour
 
     protected virtual void Start()
     {
-        // --- Validate ---
+        // --- Validate required fields ---
         this.AssertField(Hmd, nameof(Hmd));
         this.AssertField(_poseActiveVisualPrefab, nameof(_poseActiveVisualPrefab));
         this.AssertField(_poses, nameof(_poses));
-        if (_poses.Length < 2)
+        if (_poses.Length < 4)
         {
-            Debug.LogError("[DefenseSkill] _poses cần 2 phần tử: [0]=Paper, [1]=Stop");
+            Debug.LogError("[DefenseSkill] _poses must have 4 elements: 0=PaperL,1=PaperR,2=StopL,3=StopR");
             enabled = false;
             return;
         }
 
-        // --- Init visuals ---
+        // --- Create visual helpers for each pose ---
         _poseActiveVisuals = new GameObject[_poses.Length];
         for (int i = 0; i < _poses.Length; i++)
         {
@@ -97,7 +105,7 @@ public class DefenseSkill : MonoBehaviour
             _poseActiveVisuals[i].SetActive(false);
         }
 
-        // --- Subscribe pose events (and remember delegates to unsubscribe later) ---
+        // --- Subscribe to pose selection events ---
         _lastCastTimes = new float[_poses.Length];
         for (int i = 0; i < _poses.Length; i++)
         {
@@ -112,17 +120,17 @@ public class DefenseSkill : MonoBehaviour
             _subsOnSelected.Add(onSel);
             _subsOnUnselected.Add(onUnsel);
 
-            _poses[i].WhenSelected   += onSel;
+            _poses[i].WhenSelected += onSel;
             _poses[i].WhenUnselected += onUnsel;
         }
 
-        // --- Beam pool ---
+        // --- Initialize beam pool ---
         InitBeamPool();
     }
 
     private void OnDestroy()
     {
-        // Unsubscribe để tránh leak / gọi vào object đã Destroy
+        // Clean up subscriptions to avoid leaks or callbacks after destroy
         if (_poses != null)
         {
             for (int i = 0; i < _poses.Length; i++)
@@ -135,27 +143,24 @@ public class DefenseSkill : MonoBehaviour
         }
     }
 
-    // ---------------- UI/Visuals ----------------
+    // ---------------- UI / Visuals ----------------
 
     private void ShowVisuals(int poseNumber)
     {
         if (!Hmd.TryGetRootPose(out Pose hmdPose)) return;
 
+        // spawn near HMD, then snap near the corresponding wrist if available
         Vector3 spawnSpot = hmdPose.position + hmdPose.forward * 0.3f;
         _poseActiveVisuals[poseNumber].transform.position = spawnSpot;
-        _poseActiveVisuals[poseNumber].transform.LookAt(2 * _poseActiveVisuals[poseNumber].transform.position - hmdPose.position);
+        _poseActiveVisuals[poseNumber].transform.LookAt(
+            2 * _poseActiveVisuals[poseNumber].transform.position - hmdPose.position);
 
-        var hands = _poses[poseNumber].GetComponents<HandRef>();
-        Vector3 visualsPos = Vector3.zero;
-        int count = 0;
-        foreach (var hand in hands)
+        var hand = GetHandForPose(poseNumber);
+        if (hand != null && hand.GetRootPose(out Pose wristPose))
         {
-            if (!hand.GetRootPose(out Pose wristPose)) continue;
-            visualsPos += wristPose.position + wristPose.forward * .15f + Vector3.up * .02f;
-            count++;
+            _poseActiveVisuals[poseNumber].transform.position =
+                wristPose.position + wristPose.forward * .15f + Vector3.up * .02f;
         }
-        if (count > 0)
-            _poseActiveVisuals[poseNumber].transform.position = visualsPos / count;
 
         _poseActiveVisuals[poseNumber].SetActive(true);
     }
@@ -166,55 +171,66 @@ public class DefenseSkill : MonoBehaviour
             _poseActiveVisuals[poseNumber].SetActive(false);
     }
 
+    // ---------------- Helpers ----------------
+
+    private HandRef GetHandForPose(int poseIndex)
+    {
+        // // Try to fetch the HandRef associated with this pose in its hierarchy
+        // var hand = _poses[poseIndex].GetComponentInParent<HandRef>();
+        // if (!hand) hand = _poses[poseIndex].GetComponent<HandRef>();
+        // if (!hand) hand = _poses[poseIndex].GetComponentInChildren<HandRef>();
+        return _poses[poseIndex].GetComponent<HandRef>();
+    }
+
     // ---------------- Skill Triggering ----------------
 
     private void TryTriggerSkill(int poseIndex)
     {
-        // chống spam do pose state flicker
+        // Debounce to prevent rapid re-trigger from pose flicker
         if (Time.unscaledTime - _lastCastTimes[poseIndex] < retriggerCooldown)
             return;
         _lastCastTimes[poseIndex] = Time.unscaledTime;
 
         switch (poseIndex)
         {
-            case PAPER_LEFT_INDEX: 
-            case PAPER_RIGHT_INDEX: 
-                FirePaperBeamFromAllHands(poseIndex); 
+            case PAPER_LEFT_INDEX:
+            case PAPER_RIGHT_INDEX:
+                FirePaperBeamFromPose(poseIndex);
                 break;
+
             case STOP_LEFT_INDEX:
             case STOP_RIGHT_INDEX:
-                CastStopFromAllHands(poseIndex); 
+                CastStopFromPose(poseIndex);
                 break;
+
             default:
                 if (debugLogs) Debug.Log($"[DefenseSkill] Unknown pose index {poseIndex}");
                 break;
         }
     }
 
-    // ---- Paper Pose: bắn tia từ các tay (fallback HMD nếu không có tay) ----
-    private void FirePaperBeamFromAllHands(int poseIndex)
+    // ---- Paper: fire from the pose's hand (fallback to HMD if hand missing) ----
+    private void FirePaperBeamFromPose(int poseIndex)
     {
-        var hands = _poses[poseIndex].GetComponents<HandRef>();
-        bool any = false;
+        var hand = GetHandForPose(poseIndex);
         var uniqueHits = new HashSet<DroneHealth>();
-
-        foreach (var hand in hands)
+        if (hand != null && hand.GetRootPose(out Pose wristPose))
         {
-            if (!hand.GetRootPose(out Pose wristPose)) continue;
-            any = true;
             ShootPaper(wristPose.position, wristPose.forward, uniqueHits);
+            return;
         }
-        if (!any && Hmd.TryGetRootPose(out Pose hmdPose))
-        {
+
+        // Fallback to HMD
+        if (Hmd.TryGetRootPose(out Pose hmdPose))
             ShootPaper(hmdPose.position, hmdPose.forward, uniqueHits);
-        }
     }
-    
+
     private void ShootPaper(Vector3 origin, Vector3 dir, HashSet<DroneHealth> unique)
     {
         if (dir.sqrMagnitude < 1e-6f) return;
         dir = dir.normalized;
 
+        // Start 30 cm in front of the hand/wrist
         Vector3 start = origin + dir * startOffsetMeters;
 
         if (SphereRay(start, dir, out RaycastHit hit))
@@ -222,8 +238,7 @@ public class DefenseSkill : MonoBehaviour
             DrawBeam(start, hit.point);
 
             var health = hit.collider.GetComponentInParent<DroneHealth>();
-
-            if (health && unique.Add(health))
+            if (health != null && unique.Add(health))
             {
                 health.ApplyDamage(paperDamage);
                 if (debugLogs) Debug.Log($"[Paper] Hit {health.name} dmg={paperDamage}");
@@ -236,65 +251,105 @@ public class DefenseSkill : MonoBehaviour
         }
     }
 
-    // ---- Stop Pose: Freeze + Damage ----
-    private void CastStopFromAllHands(int poseIndex)
+    // ---- Stop: freeze from the palm normal (fallback to HMD if hand missing) ----
+    private void CastStopFromPose(int poseIndex)
     {
-        var hands = _poses[poseIndex].GetComponents<HandRef>();
-        bool any = false;
+        var hand = GetHandForPose(poseIndex);
         var uniqueHits = new HashSet<DroneHealth>();
 
-        foreach (var hand in hands)
+        if (hand != null && TryGetPalmAim(hand, out var origin, out var dir))
         {
-            if (TryGetPalmAim(hand, out var origin, out var dir))
-            {
-                any = true;
-                ShootStop(origin, dir, uniqueHits);
-            }
+            ShootStop(origin, dir, uniqueHits);
+            return;
         }
 
-        // Fallback HMD nếu không thấy tay
-        if (!any && Hmd.TryGetRootPose(out Pose hmdPose))
+        // Fallback to HMD
+        if (Hmd.TryGetRootPose(out Pose hmdPose))
         {
             ShootStop(hmdPose.position, hmdPose.forward, uniqueHits);
         }
     }
-    
+
     private bool TryGetPalmAim(HandRef hand, out Vector3 origin, out Vector3 dir)
     {
         origin = default;
         dir = default;
 
-        // Ưu tiên lấy đúng khớp Palm nếu version SDK hỗ trợ
-        // HandRef trong Oculus Interaction hỗ trợ GetJointPose(HandJointId, out Pose)
-        Pose palmPose;
-        try
+        const float EPS = 1e-6f;
+        Vector3 baseDir;
+
+        // 1) Prefer the Palm joint
+        if (hand.GetJointPose(HandJointId.HandPalm, out Pose palmPose))
         {
-            if (hand.GetJointPose(HandJointId.HandPalm, out palmPose))
+            // Common Oculus rigs: outward palm normal ≈ -palmPose.up
+            baseDir = -palmPose.up; // flip if your rig is opposite
+
+            // Flatten to horizontal so the beam is always parallel to the ground
+            dir = Vector3.ProjectOnPlane(baseDir, Vector3.up);
+
+            if (dir.sqrMagnitude < EPS)
             {
-                dir = palmPose.forward;                 // pháp tuyến lòng bàn tay
-                if (invertPalmForward) dir = -dir;      // đảo hướng nếu cần
-                dir.Normalize();
-
-                origin = palmPose.position + dir * startOffsetMeters; // bắt đầu cách lòng bàn tay 3cm
-                return true;
+                // Fallback: use wrist forward (flattened)
+                if (hand.GetRootPose(out Pose wristFromPalm))
+                    dir = Vector3.ProjectOnPlane(wristFromPalm.forward, Vector3.up);
             }
-        }
-        catch { /* một số version không có Palm -> fallback */ }
 
-        // Fallback: suy đoán từ cổ tay
-        if (hand.GetRootPose(out Pose wristPose))
-        {
-            // Heuristic: tịnh tiến ra giữa lòng bàn tay ~ 6cm từ cổ tay
-            // Dùng forward của cổ tay làm pháp tuyến lòng bàn tay (nếu sai, bật invert hoặc đổi sang wristPose.up)
-            dir = wristPose.forward;
-            if (invertPalmForward) dir = -dir;
+            if (dir.sqrMagnitude < EPS)
+            {
+                dir = Vector3.ProjectOnPlane(Vector3.forward, Vector3.up);
+            }
+
+            dir.y = 0f; // ensure perfectly horizontal
+            if (dir.sqrMagnitude < EPS) return false;
             dir.Normalize();
 
-            origin = wristPose.position + dir * (0.06f + startOffsetMeters);
+            origin = palmPose.position + dir * startOffsetMeters;
+            return true;
+        }
+
+        // 2) Fallback: estimate palm plane from wrist + middle fingertip
+        Pose wristEst, middleTip;
+        bool hasWrist = hand.GetJointPose(HandJointId.HandWristRoot, out wristEst);
+        bool hasMid = hand.GetJointPose(HandJointId.HandMiddle3, out middleTip);
+
+        if (hasWrist && hasMid)
+        {
+            Vector3 palmCenter = Vector3.Lerp(wristEst.position, middleTip.position, 0.6f);
+            Vector3 axis = (middleTip.position - wristEst.position).normalized;
+            Vector3 approxRight = wristEst.right;
+            baseDir = Vector3.Cross(axis, approxRight).normalized;
+
+            dir = Vector3.ProjectOnPlane(baseDir, Vector3.up);
+            if (dir.sqrMagnitude < EPS)
+                dir = Vector3.ProjectOnPlane(wristEst.forward, Vector3.up);
+
+            if (dir.sqrMagnitude < EPS)
+                dir = Vector3.ProjectOnPlane(Vector3.forward, Vector3.up);
+
+            dir.y = 0f;
+            if (dir.sqrMagnitude < EPS) return false;
+            dir.Normalize();
+
+            origin = palmCenter + dir * startOffsetMeters;
+            return true;
+        }
+
+        // 3) Last fallback: wrist forward (flattened)
+        if (hand.GetRootPose(out Pose wristFinal))
+        {
+            baseDir = wristFinal.forward;
+            dir = Vector3.ProjectOnPlane(baseDir, Vector3.up);
+            dir.y = 0f;
+
+            if (dir.sqrMagnitude < EPS) return false;
+            dir.Normalize();
+
+            origin = wristFinal.position + dir * (0.06f + startOffsetMeters);
             return true;
         }
 
         return false;
+
     }
 
     private void ShootStop(Vector3 origin, Vector3 dir, HashSet<DroneHealth> unique)
@@ -310,7 +365,7 @@ public class DefenseSkill : MonoBehaviour
                 ? hit.collider.attachedRigidbody.GetComponentInParent<DroneHealth>()
                 : hit.collider.GetComponentInParent<DroneHealth>();
 
-            if (health && unique.Add(health))
+            if (health != null && unique.Add(health))
             {
                 health.FreezeAndDamage(freezeSeconds, stopDamage);
                 if (debugLogs) Debug.Log($"[Stop] Hit {health.name} freeze={freezeSeconds}s dmg={stopDamage}");
@@ -318,6 +373,7 @@ public class DefenseSkill : MonoBehaviour
         }
         else
         {
+            // Always draw a miss beam for feedback
             DrawBeam(origin, origin + dir * maxRayDistance);
         }
     }
@@ -327,14 +383,14 @@ public class DefenseSkill : MonoBehaviour
     private bool SphereRay(Vector3 origin, Vector3 dir, out RaycastHit hit)
     {
         dir.Normalize();
-        // ưu tiên SphereCast, giảm miss trên thiết bị
-        if (Physics.SphereCast(origin, raySphereRadius, dir, out hit, maxRayDistance, droneLayerMask, triggerInteraction))
+
+        // Prefer SphereCast to reduce misses on device due to small colliders
+        if (Physics.SphereCast(origin, raySphereRadius, dir, out hit, maxRayDistance, droneLayerMask,
+                triggerInteraction))
             return true;
 
-        // Fallback Raycast mảnh
-        //return Physics.Raycast(origin, dir, out hit, maxRayDistance, droneLayerMask, triggerInteraction);
-
-        return false;
+        // Fallback to a thin Raycast if SphereCast misses
+        return Physics.Raycast(origin, dir, out hit, maxRayDistance, droneLayerMask, triggerInteraction);
     }
 
     // ---------------- Beam Pooling ----------------
@@ -383,7 +439,7 @@ public class DefenseSkill : MonoBehaviour
             _beamPool.Enqueue(lr);
         }
     }
-    
+
 #if UNITY_EDITOR
     private void Update()
     {
@@ -396,14 +452,13 @@ public class DefenseSkill : MonoBehaviour
 
         if (Input.GetKeyDown(paperKey))
         {
-            // bắn Paper một phát (tia 10m, gây damage nếu trúng)
-            var unique = new System.Collections.Generic.HashSet<DroneHealth>();
-            ShootPaper(src.position, src.forward, unique); // dùng đúng hàm nội bộ của bạn
+            var unique = new HashSet<DroneHealth>();
+            ShootPaper(src.position, src.forward, unique);
         }
+
         if (Input.GetKeyDown(stopKey))
         {
-            // bắn Stop (đóng băng 2s + damage)
-            var unique = new System.Collections.Generic.HashSet<DroneHealth>();
+            var unique = new HashSet<DroneHealth>();
             ShootStop(src.position, src.forward, unique);
         }
     }
