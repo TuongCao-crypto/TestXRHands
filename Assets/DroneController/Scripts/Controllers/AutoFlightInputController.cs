@@ -139,6 +139,7 @@ public class AutoFlightInputController : MonoBehaviour
                 SetInputs(0, 0, 0);
                 _flightStage = EFlightStage.Success;
                 Debug.Log($"{gameObject.name}: Success (home reached)");
+                ScoreManager.Instance.RegisterDataCaptured();
             }
             else
             {

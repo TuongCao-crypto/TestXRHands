@@ -42,6 +42,7 @@ public class DroneHealth : MonoBehaviour
 
     private Transform Anchor => effectAnchor != null ? effectAnchor : transform;
 
+    private AttackerManager _attackerManager;
     void Awake()
     {
         _hp = maxHP;
@@ -65,6 +66,11 @@ public class DroneHealth : MonoBehaviour
         if (countdownText != null)
             countdownText.gameObject.SetActive(false);
        
+    }
+
+    public void Init(AttackerManager parent)
+    {
+        _attackerManager = parent;
     }
 
     private void Update()
@@ -92,6 +98,8 @@ public class DroneHealth : MonoBehaviour
     /// </summary>
     public void ApplyDamage(float dmg)
     {
+        if(shieldActive) return;
+        
         if (_hp <= 0f) return;
 
         // Spawn one-shot hit VFX
@@ -209,6 +217,7 @@ public class DroneHealth : MonoBehaviour
     /// </summary>
     private void Explode()
     {
+        ScoreManager.Instance.RegisterDroneDowned();
         // Turn off countdown and freeze FX if any
         if (countdownText != null)
         {

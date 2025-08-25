@@ -30,6 +30,7 @@ TagManager:
   - QDSUIToggleCheckboxRadio
   - Ground
   - Data
+  - Missile
   layers:
   - Default
   - TransparentFX
@@ -37,7 +38,7 @@ TagManager:
   - Drone
   - Water
   - UI
-  - 
+  - Overlay UI
   - 
   - 
   - 

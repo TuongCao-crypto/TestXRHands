@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using DG.Tweening;
 using TMPro;
 using UnityEngine;
 using Oculus.Interaction; // ActiveStateSelector
@@ -40,11 +41,12 @@ public class DefenseSkill : MonoBehaviour
 
     [Header("Stop (Freeze)")] [SerializeField]
     private float stopDamage = 1f;
-
     [SerializeField] private float freezeSeconds = 2f;
-
-    [Header("Palm Aim")] [SerializeField]
-    private bool invertPalmForward = false; // flip palm firing direction if your rig's normal is reversed
+    [SerializeField] private GameObject stopProjectilePrefab;   // VFX that flies forward (no collider needed)
+    [SerializeField] private int stopProjectilePoolSize = 6;    // pool size for stop projectiles
+    [SerializeField] private float stopProjectileSpeed = 20f;   // meters per second
+    [SerializeField] private bool stopProjectileFaceDirection = true;
+    private Queue<GameObject> _stopProjectilePool;
 
     [Header("Beam FX (Pooled)")] [SerializeField]
     private GameObject beamPrefab; // prefab containing a LineRenderer (optional)
@@ -126,6 +128,7 @@ public class DefenseSkill : MonoBehaviour
 
         // --- Initialize beam pool ---
         InitBeamPool();
+        InitStopProjectilePool();
     }
 
     private void OnDestroy()
@@ -175,10 +178,6 @@ public class DefenseSkill : MonoBehaviour
 
     private HandRef GetHandForPose(int poseIndex)
     {
-        // // Try to fetch the HandRef associated with this pose in its hierarchy
-        // var hand = _poses[poseIndex].GetComponentInParent<HandRef>();
-        // if (!hand) hand = _poses[poseIndex].GetComponent<HandRef>();
-        // if (!hand) hand = _poses[poseIndex].GetComponentInChildren<HandRef>();
         return _poses[poseIndex].GetComponent<HandRef>();
     }
 
@@ -359,23 +358,92 @@ public class DefenseSkill : MonoBehaviour
 
         if (SphereRay(origin, dir, out RaycastHit hit))
         {
-            DrawBeam(origin, hit.point);
+            // Visual: spawn projectile from palm to hit point
+            PlayStopProjectile(origin, hit.point, hit.collider);
 
-            var health = hit.collider.attachedRigidbody
-                ? hit.collider.attachedRigidbody.GetComponentInParent<DroneHealth>()
-                : hit.collider.GetComponentInParent<DroneHealth>();
-
-            if (health != null && unique.Add(health))
-            {
-                health.FreezeAndDamage(freezeSeconds, stopDamage);
-                if (debugLogs) Debug.Log($"[Stop] Hit {health.name} freeze={freezeSeconds}s dmg={stopDamage}");
-            }
         }
         else
         {
-            // Always draw a miss beam for feedback
-            DrawBeam(origin, origin + dir * maxRayDistance);
+            // Miss: fly straight to max range along the same (already-flattened) direction
+            Vector3 end = origin + dir * maxRayDistance;
+            PlayStopProjectile(origin, end, null);
         }
+    }
+    private void PlayStopProjectile(Vector3 start, Vector3 end, Collider hit)
+    {
+        if (_stopProjectilePool == null || _stopProjectilePool.Count == 0)
+            _stopProjectilePool?.Enqueue(CreateStopProjectile());
+
+        var go = _stopProjectilePool.Dequeue();
+        go.transform.position = start;
+        if (stopProjectileFaceDirection)
+            go.transform.rotation = Quaternion.LookRotation((end - start).sqrMagnitude > 1e-6f ? (end - start).normalized : Vector3.forward);
+
+        go.SetActive(true);
+        StartCoroutine(MoveStopProjectile(go, start, end, hit));
+    }
+
+    private IEnumerator MoveStopProjectile(GameObject go, Vector3 start, Vector3 end, Collider hit)
+    {
+        float dist = Vector3.Distance(start, end);
+        float speed = Mathf.Max(0.01f, stopProjectileSpeed);
+        float dur = dist / speed;
+
+        float t = 0f;
+        while (t < dur && go != null && go.activeSelf)
+        {
+            t += Time.deltaTime;
+            float u = Mathf.Clamp01(t / dur);
+            go.transform.position = Vector3.Lerp(start, end, u);
+            yield return null;
+        }
+
+        if (go != null)
+        {
+            go.SetActive(false);
+            _stopProjectilePool.Enqueue(go);
+        }
+
+        if (hit != null)
+        {
+            var health = hit.GetComponentInParent<DroneHealth>();
+            if (health != null)
+            {
+                //health.FreezeAndDamage(freezeSeconds, stopDamage);
+                health.ApplyDamage(stopDamage);
+                if (debugLogs) Debug.Log($"[Stop] Hit {health.name} freeze={freezeSeconds}s dmg={stopDamage}");
+            }
+        }
+    }
+    private void InitStopProjectilePool()
+    {
+        _stopProjectilePool = new Queue<GameObject>(Mathf.Max(1, stopProjectilePoolSize));
+        for (int i = 0; i < stopProjectilePoolSize; i++)
+            _stopProjectilePool.Enqueue(CreateStopProjectile());
+    }
+
+    private GameObject CreateStopProjectile()
+    {
+        GameObject go;
+        if (stopProjectilePrefab != null)
+            go = Instantiate(stopProjectilePrefab);
+        else
+            go = GameObject.CreatePrimitive(PrimitiveType.Sphere); // simple fallback visual
+
+        go.SetActive(false);
+
+        // If we used a primitive fallback, remove collider & shadows
+        var col = go.GetComponent<Collider>();
+        if (col) Destroy(col);
+
+        var r = go.GetComponent<Renderer>();
+        if (r)
+        {
+            r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            r.receiveShadows = false;
+        }
+
+        return go;
     }
 
     // ---------------- Ray Helpers ----------------
