@@ -185,6 +185,8 @@ public class DefenseSkill : MonoBehaviour
 
     private void TryTriggerSkill(int poseIndex)
     {
+        if(GameManager.Instance.GameStage != EGameStage.Live) return;
+        
         // Debounce to prevent rapid re-trigger from pose flicker
         if (Time.unscaledTime - _lastCastTimes[poseIndex] < retriggerCooldown)
             return;

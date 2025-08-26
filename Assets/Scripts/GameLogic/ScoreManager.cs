@@ -35,7 +35,7 @@ public class ScoreManager : SingletonMono<ScoreManager>
 
     private void Awake()
     {
-        ResetScores();
+        StartMatch();
     }
 
     private void OnEnable()
@@ -49,6 +49,12 @@ public class ScoreManager : SingletonMono<ScoreManager>
     {
         if (matchTimer != null)
             matchTimer.onTimerEnd.RemoveListener(EndMatchNow);
+    }
+
+    public void StartMatch()
+    {
+        ResetScores();
+        matchTimer.StartTimer();
     }
 
     /// <summary>
@@ -68,6 +74,13 @@ public class ScoreManager : SingletonMono<ScoreManager>
     {
         if (_ended) return;
         _defenseScore += pointsPerDroneDown;
+        UpdateUIAndNotify();
+    }
+    
+    public void RegisterDroneTakeDamge()
+    {
+        if (_ended) return;
+        _defenseScore += 10;
         UpdateUIAndNotify();
     }
 
@@ -91,6 +104,10 @@ public class ScoreManager : SingletonMono<ScoreManager>
         }
 
         onWinnerDecided?.Invoke(winner);
+        matchTimer.PauseTimer();
+
+        GameManager.Instance.EndGame();
+        
     }
 
     /// <summary>

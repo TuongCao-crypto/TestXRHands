@@ -79,12 +79,17 @@ public class AutoFlightInputController : MonoBehaviour
         hoverTime = hoverPauseSeconds;
     }
 
+    public void SetTarget(Transform target)
+    {
+        this.target = target;
+    }
+
     void FixedUpdate()
     {
         if (droneMotor == null || droneMotor.CurrentState == DroneState.Off) return;
 
         // Stop all angular inputs if Success
-        if (_flightStage == EFlightStage.Success)
+        if (_flightStage == EFlightStage.Success || GameManager.Instance.GameStage == EGameStage.Ended)
         {
             SetInputs(0, 0, 0, 0);
             return;
@@ -137,9 +142,11 @@ public class AutoFlightInputController : MonoBehaviour
             if (_flightStage == EFlightStage.BackHome)
             {
                 SetInputs(0, 0, 0);
-                _flightStage = EFlightStage.Success;
+                target = null;
                 Debug.Log($"{gameObject.name}: Success (home reached)");
                 ScoreManager.Instance.RegisterDataCaptured();
+                GameManager.Instance.SetDroneNewTarget(this);
+                _flightStage = EFlightStage.MoveToData;
             }
             else
             {
@@ -176,11 +183,11 @@ public class AutoFlightInputController : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        if (other.CompareTag("Data"))
+        if (other.CompareTag("Data") && _flightStage == EFlightStage.MoveToData)
         {
             Debug.Log("Collected Data");
-            // deactivate data and head home
-            other.gameObject.SetActive(false);
+            other.GetComponent<DataPickup>().Collect();
+            
             _flightStage = EFlightStage.BackHome;
         }
     }

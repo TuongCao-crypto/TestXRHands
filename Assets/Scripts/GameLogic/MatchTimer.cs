@@ -12,10 +12,8 @@ public class MatchTimer : MonoBehaviour
 
     [Header("Config")]
     [Min(0)] public float startSeconds = 60f;    // initial duration (default 60s)
-    public bool autoStart = true;                // start automatically on Enable
     public bool useUnscaledTime = false;         // use unscaled delta time (ignores Time.timeScale)
 
-    [Header("UI (optional)")]
     public TMP_Text display;                     // TextMeshPro or TextMeshProUGUI
     public bool showTenths = false;              // show tenths (MM:SS.s) instead of whole seconds
 
@@ -35,11 +33,6 @@ public class MatchTimer : MonoBehaviour
     {
         _remaining = Mathf.Max(0f, startSeconds);
         UpdateUI();
-    }
-
-    private void OnEnable()
-    {
-        if (autoStart) StartTimer();
     }
 
     /// <summary>Start (or restart) the timer from startSeconds.</summary>

@@ -43,6 +43,8 @@ public class DroneHealth : MonoBehaviour
     private Transform Anchor => effectAnchor != null ? effectAnchor : transform;
 
     private AttackerManager _attackerManager;
+    public int ID = 0;
+    
     void Awake()
     {
         _hp = maxHP;
@@ -68,8 +70,9 @@ public class DroneHealth : MonoBehaviour
        
     }
 
-    public void Init(AttackerManager parent)
+    public void Init(int id,AttackerManager parent)
     {
+        ID = id;
         _attackerManager = parent;
     }
 
@@ -109,6 +112,10 @@ public class DroneHealth : MonoBehaviour
         if (_hp <= 0f)
         {
             Explode();
+        }
+        else
+        {
+            ScoreManager.Instance.RegisterDroneTakeDamge();
         }
     }
 
@@ -217,6 +224,7 @@ public class DroneHealth : MonoBehaviour
     /// </summary>
     private void Explode()
     {
+        _attackerManager.OnDroneBroken(ID);
         ScoreManager.Instance.RegisterDroneDowned();
         // Turn off countdown and freeze FX if any
         if (countdownText != null)

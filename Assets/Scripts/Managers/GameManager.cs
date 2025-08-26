@@ -1,24 +1,8 @@
 using System;
 using System.Collections.Generic;
+using DG.Tweening;
 using DroneController;
 using UnityEngine;
-using UnityEngine.SceneManagement;
-
-public enum EGameMode
-{
-    Offline = 0,
-    Online
-}
-
-public enum EScreenMode
-{
-    Passthrough_Unrestricted = 1,
-    Passthrough_Occlusion,
-    Passthrough_CollisionAware,
-    Overlay,
-    ImmersiveInHouse,
-    ImmersiveOutDoor
-}
 
 public enum EFlightMode
 {
@@ -26,12 +10,16 @@ public enum EFlightMode
     ATTI
 }
 
+public enum EGameStage
+{
+    None = 0,
+    Live,
+    Ended
+}
+
 public class GameManager : SingletonMonoAwake<GameManager>
 {
-
-
-    [SerializeField] private EFlightMode _flightMode = EFlightMode.GPSPositioning;
-
+    private EFlightMode _flightMode = EFlightMode.GPSPositioning;
     public EFlightMode FlightMode
     {
         set
@@ -49,26 +37,38 @@ public class GameManager : SingletonMonoAwake<GameManager>
         get { return _droneState; }
         set { _droneState = value; }
     }
+    
+    public EGameStage GameStage = EGameStage.None;
+    
 
-
-    public override void OnAwake()
+    [SerializeField] AttackerManager _attackerManager;
+    [SerializeField] DefenderDataManager _defenderDataManager;
+    
+    private void Start()
     {
-        base.OnAwake();
+        StartGame();
     }
-
-   
-
+    
     public void StartGame()
     {
-       
+        GameStage = EGameStage.Live;
+        _attackerManager.SetDroneInitTargets(_defenderDataManager.ActivePickups);
+       ScoreManager.Instance.StartMatch();
     }
 
-   
-
-    public void LoadNewMode()
+    public void EndGame()
     {
-        _droneState = DroneState.Off;
-     
+        GameStage = EGameStage.Ended;
+        DOVirtual.DelayedCall(5, () =>
+        {
+            //auto re-start game
+            StartGame();
+        });
     }
 
+    public void SetDroneNewTarget(AutoFlightInputController drone)
+    {
+        _attackerManager.SetDroneTarget(drone, _defenderDataManager.ActivePickups);
+    }
+  
 }
