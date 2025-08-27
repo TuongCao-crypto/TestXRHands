@@ -59,11 +59,11 @@ public class GameManager : SingletonMonoAwake<GameManager>
     public void EndGame()
     {
         GameStage = EGameStage.Ended;
-        DOVirtual.DelayedCall(5, () =>
-        {
-            //auto re-start game
-            StartGame();
-        });
+        // DOVirtual.DelayedCall(5, () =>
+        // {
+        //     //auto re-start game
+        //     StartGame();
+        // });
     }
 
     public void SetDroneNewTarget(AutoFlightInputController drone)
