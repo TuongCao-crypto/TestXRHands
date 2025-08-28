@@ -37,6 +37,10 @@ public class AutoFlightInputController : MonoBehaviour
     public float throttleClampMax = 20f;
 
     [Header("Hover Pause")] public float hoverPauseSeconds = 2f;
+    
+    [Header("Data VFX")]
+    [SerializeField] GameObject dataVFX;
+
 
     private DroneMovement droneMotor;
     private Vector3 originalPosition;
@@ -111,6 +115,7 @@ public class AutoFlightInputController : MonoBehaviour
                     //reach Home
                     ScoreManager.Instance.RegisterDataCaptured(transform);
                     _flightStage = EFlightStage.MoveToData;
+                    dataVFX.SetActive(false);
                 }
             }
             return;
@@ -182,6 +187,7 @@ public class AutoFlightInputController : MonoBehaviour
                 ScoreManager.Instance.RegisterDataCaptured(transform);
                 GameManager.Instance.SetDroneNewTarget(this);
                 _flightStage = EFlightStage.MoveToData;
+                dataVFX.SetActive(false);
             }
             else
             {
@@ -223,6 +229,7 @@ public class AutoFlightInputController : MonoBehaviour
             Debug.Log("Collected Data");
             other.GetComponent<DataPickup>().Collect();
             _flightStage = EFlightStage.BackHome;
+            dataVFX.SetActive(true);
         }
     }
 }

@@ -56,7 +56,7 @@ public class GameManager : SingletonMonoAwake<GameManager>
         switch (GlobalData.Instance.Team)
         {
             case ETeam.Attacker:
-                cameraRig.position = new Vector3(-5f, 0, 0);
+                cameraRig.position = new Vector3(-4f, 0, 0);
                 cameraRig.rotation = Quaternion.Euler(0, 90, 0);
                 break;
 
