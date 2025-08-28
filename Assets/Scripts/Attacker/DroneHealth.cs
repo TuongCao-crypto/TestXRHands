@@ -6,6 +6,9 @@ using TMPro;
 
 public class DroneHealth : MonoBehaviour
 {
+    [Header("Main Drone")]
+    public bool isMainDrone = false;
+    
     [Header("Health")]
     [SerializeField] private float maxHP = 2f;
     [SerializeField] private GameObject explosionPrefab;
@@ -74,6 +77,10 @@ public class DroneHealth : MonoBehaviour
     {
         ID = id;
         _attackerManager = parent;
+        if (isMainDrone && GlobalData.Instance.Team == ETeam.Defender)
+        {
+            isMainDrone = false;
+        }
     }
 
     private void Update()

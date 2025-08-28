@@ -20,6 +20,7 @@ public enum EGameStage
 public class GameManager : SingletonMonoAwake<GameManager>
 {
     private EFlightMode _flightMode = EFlightMode.GPSPositioning;
+
     public EFlightMode FlightMode
     {
         set
@@ -37,23 +38,37 @@ public class GameManager : SingletonMonoAwake<GameManager>
         get { return _droneState; }
         set { _droneState = value; }
     }
-    
+
     public EGameStage GameStage = EGameStage.None;
-    
+
 
     [SerializeField] AttackerManager _attackerManager;
     [SerializeField] DefenderDataManager _defenderDataManager;
-    
+    [SerializeField] private Transform cameraRig;
+
     private void Start()
     {
         StartGame();
     }
-    
+
     public void StartGame()
     {
-        GameStage = EGameStage.Live;
+        switch (GlobalData.Instance.Team)
+        {
+            case ETeam.Attacker:
+                cameraRig.position = new Vector3(-5f, 0, 0);
+                cameraRig.rotation = Quaternion.Euler(0, 90, 0);
+                break;
+
+            case ETeam.Defender:
+                cameraRig.position = new Vector3(9.35f, 0, 0);
+                cameraRig.rotation = Quaternion.Euler(0, -90, 0);
+                break;
+        }
+
         _attackerManager.SetDroneInitTargets(_defenderDataManager.ActivePickups);
-       ScoreManager.Instance.StartMatch();
+        GameStage = EGameStage.Live;
+        ScoreManager.Instance.StartMatch();
     }
 
     public void EndGame()
@@ -70,5 +85,4 @@ public class GameManager : SingletonMonoAwake<GameManager>
     {
         _attackerManager.SetDroneTarget(drone, _defenderDataManager.ActivePickups);
     }
-  
 }

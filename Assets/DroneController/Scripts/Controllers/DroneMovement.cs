@@ -35,12 +35,12 @@ namespace DroneController
         public delegate void OnStateChangedDelegate(DroneState newState);
         public event OnStateChangedDelegate OnStateChanged;
         
-        private FlightInputChannel inputChannel;
-        float ReadPitch()    => inputChannel ? inputChannel.Pitch    : InputManager.Instance.PitchInput;
-        float ReadRoll()     => inputChannel ? inputChannel.Roll     : InputManager.Instance.RollInput;
-        float ReadYaw()      => inputChannel ? inputChannel.Yaw      : InputManager.Instance.YawInput;
-        float ReadThrottle() => inputChannel ? inputChannel.Throttle : InputManager.Instance.ThrottleInput;
-
+        private FlightInputChannel inputChannel = null;
+        float ReadPitch()    => inputChannel != null ? inputChannel.Pitch    : InputManager.Instance.PitchInput;
+        float ReadRoll()     => inputChannel != null ? inputChannel.Roll     : InputManager.Instance.RollInput;
+        float ReadYaw()      => inputChannel != null ? inputChannel.Yaw      : InputManager.Instance.YawInput;
+        float ReadThrottle() => inputChannel != null ? inputChannel.Throttle : InputManager.Instance.ThrottleInput;
+        bool IsInputIdle() => inputChannel != null ? true : InputManager.Instance.IsInputIdle();
 
         [Header("Project References:")] [SerializeField]
         private DroneMovementData _droneMovementData = default;
@@ -69,6 +69,8 @@ namespace DroneController
         [Header("WeatherSimulator")] [SerializeField]
 
         private float windEffectMultiplier = 0.1f;
+        
+        [SerializeField] bool isAutoFlight = true;
 
         public Vector3 Velocity
         {
@@ -103,39 +105,55 @@ namespace DroneController
             _rigidbody.mass = _droneMovementData.Mass;
             _animator = GetComponentInChildren<Animator>();
             _animator.enabled = false;
-            inputChannel = GetComponent<FlightInputChannel>();
         }
 
         protected virtual void Start()
         {
+            if (!isAutoFlight && GlobalData.Instance.Team == ETeam.Defender)
+            {
+                isAutoFlight = true;
+            }
+
+            if (isAutoFlight)
+            {
+                //for auto flight only
+                inputChannel = GetComponent<FlightInputChannel>();
+            }
+            
             _timeStartEngine = 2;
 
-            InputManager.OnReturnHomePressed += InputManagerOnReturnHomePressed;
-#if UNITY_EDITOR
-            InputManager.onPressKeyboard_S += InputManagerOnStartEnginePressed;
-#endif
+//             InputManager.OnReturnHomePressed += InputManagerOnReturnHomePressed;
+// #if UNITY_EDITOR
+//             InputManager.onPressKeyboard_S += InputManagerOnStartEnginePressed;
+// #endif
 
             SetStartingRotation();
 
             homePosition = new Vector3(transform.position.x, transform.position.y + 0.6f, transform.position.z);
             startPosition = new Vector3(transform.position.x, transform.position.y, transform.position.z);
             startRotation = transform.rotation.eulerAngles;
-            
-            //Auto start Drone
-            DOVirtual.DelayedCall(2, () =>
-            {
-                InputManagerOnStartEnginePressed();
-            });
 
+            if (isAutoFlight)
+            {
+                //Auto start Drone
+                DOVirtual.DelayedCall(2, () =>
+                {
+                    InputManagerOnStartEnginePressed();
+                });
+            }
+            else
+            {
+                //Maunual control Drone
+            }
         }
 
         private void OnDestroy()
         {
-            InputManager.OnReturnHomePressed -= InputManagerOnReturnHomePressed;
-
-#if UNITY_EDITOR
-            InputManager.onPressKeyboard_S -= InputManagerOnStartEnginePressed;
-#endif
+//             InputManager.OnReturnHomePressed -= InputManagerOnReturnHomePressed;
+//
+// #if UNITY_EDITOR
+//             InputManager.onPressKeyboard_S -= InputManagerOnStartEnginePressed;
+// #endif
         }
 
         private void InputManagerOnStartEnginePressed()
@@ -205,6 +223,8 @@ namespace DroneController
         {
             if (_currentState == DroneState.Off)
             {
+                if(!isAutoFlight) CheckInputStartEngine();
+                
                 return;
             }
 
@@ -318,7 +338,7 @@ namespace DroneController
                 Mathf.Lerp(_rigidbody.linearVelocity.magnitude, _droneMovementData.MaximumPitchSpeed,
                     Time.deltaTime * 5f));
 
-            if (InputManager.Instance.IsInputIdle())
+            if (IsInputIdle())
             {
                 if (GameManager.Instance.FlightMode == EFlightMode.GPSPositioning)
                 {
@@ -408,35 +428,34 @@ namespace DroneController
 
         private void CheckInputStartEngine()
         {
-            //if(GameManager.Instance.IsEditingMode) return;
 
-            // //V down
-            // if (InputManager.LeftJoyStickInput.y < 0 && InputManager.LeftJoyStickInput.x < 0)
-            // {
-            //     if (InputManager.RightJoyStickInput.y < 0 && InputManager.RightJoyStickInput.x > 0)
-            //     {
-            //         _timeStartEngine -= Time.fixedDeltaTime;
-            //         if (_timeStartEngine <= 0)
-            //         {
-            //             InputManagerOnStartEnginePressed();
-            //             _timeStartEngine = 2;
-            //         }
-            //     }
-            // }
-            //
-            // // V UP
-            // if (InputManager.LeftJoyStickInput.y < 0 && InputManager.LeftJoyStickInput.x > 0)
-            // {
-            //     if (InputManager.RightJoyStickInput.y < 0 && InputManager.RightJoyStickInput.x < 0)
-            //     {
-            //         _timeStartEngine -= Time.fixedDeltaTime;
-            //         if (_timeStartEngine <= 0)
-            //         {
-            //             InputManagerOnStartEnginePressed();
-            //             _timeStartEngine = 2;
-            //         }
-            //     }
-            // }
+             //V down
+             if (InputManager.Instance.LeftJoyStickInput.y < 0 && InputManager.Instance.LeftJoyStickInput.x < 0)
+             {
+                 if (InputManager.Instance.RightJoyStickInput.y < 0 && InputManager.Instance.RightJoyStickInput.x > 0)
+                 {
+                     _timeStartEngine -= Time.fixedDeltaTime;
+                     if (_timeStartEngine <= 0)
+                     {
+                         InputManagerOnStartEnginePressed();
+                         _timeStartEngine = 2;
+                     }
+                 }
+             }
+            
+             // V UP
+             if (InputManager.Instance.LeftJoyStickInput.y < 0 && InputManager.Instance.LeftJoyStickInput.x > 0)
+             {
+                 if (InputManager.Instance.RightJoyStickInput.y < 0 && InputManager.Instance.RightJoyStickInput.x < 0)
+                 {
+                     _timeStartEngine -= Time.fixedDeltaTime;
+                     if (_timeStartEngine <= 0)
+                     {
+                         InputManagerOnStartEnginePressed();
+                         _timeStartEngine = 2;
+                     }
+                 }
+             }
         }
 
         private void CheckHorverLanding()

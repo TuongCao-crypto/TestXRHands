@@ -12,6 +12,9 @@ public class AutoFlightInputController : MonoBehaviour
         Success
     }
 
+    [Header("Main Drone")]
+    public bool isMainDrone = false;
+    
     private FlightInputChannel _chan;
 
     [Header("Targets")] public Transform target; // world-space target (Data vault, etc.)
@@ -77,6 +80,11 @@ public class AutoFlightInputController : MonoBehaviour
         _chan = GetComponent<FlightInputChannel>();
         originalPosition = transform.position;
         hoverTime = hoverPauseSeconds;
+
+        if (isMainDrone && GlobalData.Instance.Team == ETeam.Defender)
+        {
+            isMainDrone = false;
+        }
     }
 
     public void SetTarget(Transform target)
@@ -87,11 +95,38 @@ public class AutoFlightInputController : MonoBehaviour
     void FixedUpdate()
     {
         if (droneMotor == null || droneMotor.CurrentState == DroneState.Off) return;
+        
+        //logic for Main Drone (user control)
+        if (isMainDrone)
+        {
+            if (_flightStage == EFlightStage.Off)
+            {
+                _flightStage = EFlightStage.MoveToData;
+            }
+            else if (_flightStage == EFlightStage.BackHome)
+            {
+                //reach Home
+                if (transform.position.x < 0)
+                {
+                    //reach Home
+                    ScoreManager.Instance.RegisterDataCaptured(transform);
+                    _flightStage = EFlightStage.MoveToData;
+                }
+            }
+            return;
+        }
 
+        //logic for Auto Drone
         // Stop all angular inputs if Success
         if (_flightStage == EFlightStage.Success || GameManager.Instance.GameStage == EGameStage.Ended)
         {
             SetInputs(0, 0, 0, 0);
+            return;
+        }
+
+        if (this.target == null && _flightStage == EFlightStage.MoveToData)
+        {
+            GameManager.Instance.SetDroneNewTarget(this);
             return;
         }
 
@@ -144,7 +179,7 @@ public class AutoFlightInputController : MonoBehaviour
                 SetInputs(0, 0, 0);
                 target = null;
                 Debug.Log($"{gameObject.name}: Success (home reached)");
-                ScoreManager.Instance.RegisterDataCaptured();
+                ScoreManager.Instance.RegisterDataCaptured(transform);
                 GameManager.Instance.SetDroneNewTarget(this);
                 _flightStage = EFlightStage.MoveToData;
             }
@@ -187,7 +222,6 @@ public class AutoFlightInputController : MonoBehaviour
         {
             Debug.Log("Collected Data");
             other.GetComponent<DataPickup>().Collect();
-            
             _flightStage = EFlightStage.BackHome;
         }
     }

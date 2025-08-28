@@ -5,13 +5,7 @@ public class AttackerManager : MonoBehaviour
 {
     private List<DroneHealth> dronesHealth;
     private readonly Dictionary<AutoFlightInputController, Transform> _assignedTargets = new();
-
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
-    {
-        dronesHealth = new List<DroneHealth>(GetComponentsInChildren<DroneHealth>(true));
-        InitializeDroneHealth();
-    }
+    
 
     public void InitializeDroneHealth()
     {
@@ -23,56 +17,15 @@ public class AttackerManager : MonoBehaviour
 
     public void SetDroneInitTargets(IReadOnlyList<DataPickup> targets)
     {
+        dronesHealth = new List<DroneHealth>(GetComponentsInChildren<DroneHealth>(true));
+        InitializeDroneHealth();
+        
         for (int i = 0; i < dronesHealth.Count; i++)
         {
+            if(dronesHealth[i].isMainDrone) continue;
+            
             SetDroneTarget(dronesHealth[i].GetComponent<AutoFlightInputController>(), targets);
         }
-        // int n = dronesHealth.Count;
-        // int m = targets.Count;
-        //
-        // // Build all (drone, target) pairs with squared distance
-        // var pairs = new List<(int di, int ti, float d2)>(n * m);
-        // for (int di = 0; di < n; di++)
-        // {
-        //     var d = dronesHealth[di];
-        //     if (d == null) continue;
-        //     Vector3 dp = d.transform.position;
-        //
-        //     for (int ti = 0; ti < m; ti++)
-        //     {
-        //         var t = targets[ti];
-        //         if (t == null) continue;
-        //         float d2 = (t.transform.position - dp).sqrMagnitude;
-        //         pairs.Add((di, ti, d2));
-        //     }
-        // }
-        //
-        // // Sort by distance ascending (global greedy assignment)
-        // pairs.Sort((a, b) => a.d2.CompareTo(b.d2));
-        //
-        // var usedDrone = new bool[n];
-        // var usedTarget = new bool[m];
-        // int assigned = 0;
-        //
-        // foreach (var p in pairs)
-        // {
-        //     if (assigned >= n) break; // all drones assigned
-        //     if (usedDrone[p.di] || usedTarget[p.ti]) // already taken
-        //         continue;
-        //
-        //     var droneHealth = dronesHealth[p.di];
-        //     var targetPickup = targets[p.ti];
-        //     if (droneHealth == null || targetPickup == null) continue;
-        //
-        //     var ctrl = droneHealth.GetComponent<AutoFlightInputController>();
-        //     if (ctrl != null)
-        //     {
-        //         ctrl.target = targetPickup.transform;
-        //         usedDrone[p.di] = true;
-        //         usedTarget[p.ti] = true;
-        //         assigned++;
-        //     }
-        // }
     }
 
     /// <summary>
@@ -105,7 +58,7 @@ public class AttackerManager : MonoBehaviour
             if (t == null || !t.gameObject.activeInHierarchy) continue;
 
             Transform tt = t.transform;
-            if (IsTargetAssignedToAnotherDrone(tt, drone)) continue;
+                if (IsTargetAssignedToAnotherDrone(tt, drone)) continue;
 
             float sqr = (tt.position - dp).sqrMagnitude;
             if (sqr < bestSqr)
