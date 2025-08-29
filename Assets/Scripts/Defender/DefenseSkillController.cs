@@ -167,28 +167,6 @@ public class DefenseSkillController : MonoBehaviour
         return v.sqrMagnitude > 1e-6f ? v.normalized : Vector3.forward;
     }
 
-    private bool GetRightPrimaryButtonDown()
-    {
-        // Quest Touch: A button
-#if UNITY_XR_MANAGEMENT || ENABLE_VR
-        var device = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
-        if (device.isValid && device.TryGetFeatureValue(CommonUsages.primaryButton, out bool pressed) && pressed)
-            return true;
-#endif
-        return false;
-    }
-
-    private bool GetRightSecondaryButtonDown()
-    {
-        // Quest Touch: B button
-#if UNITY_XR_MANAGEMENT || ENABLE_VR
-        var device = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
-        if (device.isValid && device.TryGetFeatureValue(CommonUsages.secondaryButton, out bool pressed) && pressed)
-            return true;
-#endif
-        return false;
-    }
-
     // ========= Skills =========
 
     private void ShootPaper(Vector3 origin, Vector3 dir, HashSet<DroneHealth> unique)
@@ -308,7 +286,6 @@ public class DefenseSkillController : MonoBehaviour
             var health = hit.GetComponentInParent<DroneHealth>();
             if (health != null)
             {
-                //health.FreezeAndDamage(freezeSeconds, stopDamage);
                 health.ApplyDamage(stopDamage);
                 if (debugLogs) Debug.Log($"[Stop] Hit {health.name} freeze={freezeSeconds}s dmg={stopDamage}");
             }
