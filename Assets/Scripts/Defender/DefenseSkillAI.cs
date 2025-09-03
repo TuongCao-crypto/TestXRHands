@@ -3,16 +3,24 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// AI that auto-uses Defense skills (Paper/Stop) against the nearest drone:
-/// - Random fire cadence (each shot schedules the next between [minFireDelay, maxFireDelay]).
-/// - Hit probability (hitChance); on miss, aim is intentionally deviated (or damage is skipped).
-/// - Prefers Stop (freeze) when its cooldown is ready; otherwise Paper.
+/// AI that auto-uses Defense skills (Paper/Stop) with a cannon model:
+/// - Smoothly rotates a cannon pivot toward the pending shot direction.
+/// - Random fire cadence [minFireDelay, maxFireDelay].
+/// - Hit probability (hitChance); misses deviate aim within a cone.
+/// - Prefers Stop when ready, else Paper.
 /// </summary>
 public class DefenseSkillAI : MonoBehaviour
 {
     [Header("Origin & Aiming")]
+    [Tooltip("Fire origin (e.g., a muzzle transform under the cannon). If null, uses this transform.")]
     [SerializeField] private Transform fireOrigin;
+    [Tooltip("Rotate this pivot to aim the cannon (usually a parent of fireOrigin).")]
+    [SerializeField] private Transform cannonPivot;
+    [Tooltip("If true, rotate only around Y (horizontal yaw).")]
+    [SerializeField] private bool yawOnly = false;
+    [Tooltip("If true, flatten shot direction to horizontal (dir.y=0).")]
     [SerializeField] private bool flattenForward = false;
+    [Tooltip("Ray/effect starts this far in front of fire origin.")]
     [SerializeField] private float startOffsetMeters = 0.30f;
 
     [Header("Detection")]
@@ -47,37 +55,48 @@ public class DefenseSkillAI : MonoBehaviour
     [SerializeField] private float beamLifetime = 0.12f;
 
     [Header("Fire Cadence (Random)")]
-    [Tooltip("Next shot is scheduled randomly in this range after each attempt.")]
     [Min(0.01f)] [SerializeField] private float minFireDelay = 0.35f;
     [Min(0.01f)] [SerializeField] private float maxFireDelay = 1.20f;
 
     [Header("Accuracy")]
-    [Tooltip("Chance to actually hit the target (0..1).")]
     [Range(0f, 1f)] [SerializeField] private float hitChance = 0.7f;
-    [Tooltip("Cone angle (degrees) used to deviate aim when missing.")]
     [SerializeField] private float missAngleDegrees = 12f;
-    [Tooltip("Small jitter even on hit (degrees) to look natural.")]
     [SerializeField] private float hitAimJitterDegrees = 1.5f;
+
+    [Header("Cannon Aiming")]
+    [Tooltip("Max rotation speed of the cannon (deg/sec).")]
+    [SerializeField] private float rotateSpeedDeg = 360f;
+    [Tooltip("Require cannon to align within this angle before firing (deg).")]
+    [SerializeField] private float aimToleranceDeg = 3f;
+    [Tooltip("If true, delay the shot until cannon aligns to pending shot direction.")]
+    [SerializeField] private bool alignBeforeFiring = true;
 
     [Header("Debug")]
     [SerializeField] private bool debugLogs = false;
     [SerializeField] private bool drawGizmos = true;
 
-    private float delayStart = 5f;
-
-    // Runtime
+    // Runtime pools
     private Queue<LineRenderer> _beamPool;
     private Queue<GameObject> _stopProjectilePool;
+
+    // Timers
     private float _lastPaperTime = -999f;
     private float _lastStopTime  = -999f;
     private float _nextScanTime  = 0f;
     private float _nextFireTime  = 0f;
 
+    // Target & pending shot
     private DroneHealth _currentTarget;
+
+    private enum ShotKind { None, Paper, Stop }
+    private ShotKind _pendingShotKind = ShotKind.None;
+    private Vector3  _pendingShotDir  = Vector3.forward;
+    private bool     _pendingApplyDamage = true;
 
     private void Awake()
     {
-        if (!fireOrigin) fireOrigin = transform;
+        if (!fireOrigin)  fireOrigin  = transform;
+        if (!cannonPivot) cannonPivot = transform;
         if (maxFireDelay < minFireDelay) maxFireDelay = minFireDelay;
     }
 
@@ -85,18 +104,13 @@ public class DefenseSkillAI : MonoBehaviour
     {
         InitBeamPool();
         InitStopProjectilePool();
-        ScheduleNextFire(); // start with a random delay
+        ScheduleNextFire();
     }
 
     private void Update()
     {
-        if (delayStart > 0)
-        {
-            delayStart -= Time.deltaTime;
-            return;
-        }
-
-        // Acquire/refresh target at scan interval
+        if(GameManager.Instance.GameStage != EGameStage.Live) return;
+        // Acquire/refresh nearest target
         if (Time.time >= _nextScanTime)
         {
             _nextScanTime = Time.time + scanInterval;
@@ -104,51 +118,108 @@ public class DefenseSkillAI : MonoBehaviour
                 _currentTarget = FindNearestDrone();
         }
 
-        // If no target, just push next fire a bit and wait
-        if (!IsValidTarget(_currentTarget))
+        // Compute a base aim direction toward target (for idle tracking)
+        Vector3 baseAimDir = cannonPivot.forward;
+        if (IsValidTarget(_currentTarget))
         {
-            if (Time.time >= _nextFireTime) ScheduleNextFire();
+            baseAimDir = _currentTarget.transform.position - fireOrigin.position;
+            if (flattenForward) baseAimDir.y = 0f;
+            if (baseAimDir.sqrMagnitude > 1e-6f) baseAimDir.Normalize();
+        }
+
+        // If we have a pending shot, steer to that exact direction (smooth)
+        if (_pendingShotKind != ShotKind.None)
+        {
+            SmoothAimTowards(_pendingShotDir);
+            // Only fire when aligned enough (or immediately if disabled)
+            if (!alignBeforeFiring || IsAlignedTo(_pendingShotDir))
+            {
+                FirePendingShot();
+                ScheduleNextFire();
+            }
             return;
         }
 
-        // Fire only when the randomized timer elapses
-        if (Time.time < _nextFireTime) return;
+        // No pending shot: track target smoothly
+        SmoothAimTowards(baseAimDir);
 
-        // Compute origin & direction to current target
-        Vector3 origin = fireOrigin.position;
-        Vector3 dir    = (_currentTarget.transform.position - origin);
-        if (flattenForward) dir.y = 0f;
-        if (dir.sqrMagnitude < 1e-6f) { ScheduleNextFire(); return; }
-        dir.Normalize();
-        origin += dir * startOffsetMeters;
+        // If it's not time to shoot or no target, exit
+        if (Time.time < _nextFireTime || !IsValidTarget(_currentTarget)) return;
 
-        // Decide whether this shot should be a "hit" or a "miss"
-        bool shouldHit = Random.value < hitChance;
-
-        // Choose skill: prefer Stop if ready, else Paper; if neither ready, nudge next fire to earliest ready
+        // Decide what to shoot next (Stop > Paper)
         bool stopReady  = (Time.time - _lastStopTime)  >= stopCooldown;
         bool paperReady = (Time.time - _lastPaperTime) >= paperCooldown;
 
         if (!stopReady && !paperReady)
         {
+            // Neither ready: schedule for earliest ready moment
             float tStop  = _lastStopTime  + stopCooldown;
             float tPaper = _lastPaperTime + paperCooldown;
             _nextFireTime = Mathf.Min(tStop, tPaper) + Random.Range(0.05f, 0.15f);
             return;
         }
 
-        // Apply small jitter to look less robotic (even on hit)
+        // Roll hit/miss and compute the pending shot direction once
+        bool shouldHit = Random.value < hitChance;
         float jitterDeg = shouldHit ? hitAimJitterDegrees : missAngleDegrees;
-        Vector3 finalDir = JitterDirection(dir, jitterDeg, flattenForward);
+        Vector3 shotDir = JitterDirection(baseAimDir, jitterDeg, yawOnly);
+        if (flattenForward) { shotDir.y = 0f; if (shotDir.sqrMagnitude > 1e-6f) shotDir.Normalize(); }
 
-        // Perform shot (on miss we still play visuals but skip damage application)
-        if (stopReady)
-            UseStop(origin, finalDir, applyDamage: shouldHit);
+        // Register the pending shot; rotation will converge smoothly before firing
+        _pendingShotKind   = stopReady ? ShotKind.Stop : ShotKind.Paper;
+        _pendingShotDir    = shotDir;
+        _pendingApplyDamage = shouldHit;
+    }
+
+    // ===== Rotation helpers =====
+
+    private void SmoothAimTowards(Vector3 desiredDir)
+    {
+        if (!cannonPivot) return;
+        Vector3 d = desiredDir;
+        if (yawOnly) { d.y = 0f; }
+        if (d.sqrMagnitude < 1e-6f) return;
+        d.Normalize();
+
+        Quaternion targetRot = Quaternion.LookRotation(d, Vector3.up);
+        cannonPivot.rotation = Quaternion.RotateTowards(
+            cannonPivot.rotation, targetRot, rotateSpeedDeg * Time.deltaTime);
+    }
+
+    private bool IsAlignedTo(Vector3 desiredDir)
+    {
+        if (!cannonPivot) return true;
+        Vector3 fwd = cannonPivot.forward;
+        Vector3 d   = desiredDir;
+        if (yawOnly)
+        {
+            fwd.y = 0f; d.y = 0f;
+            if (fwd.sqrMagnitude < 1e-6f || d.sqrMagnitude < 1e-6f) return true;
+            fwd.Normalize(); d.Normalize();
+        }
+        float angle = Vector3.Angle(fwd, d);
+        return angle <= aimToleranceDeg;
+    }
+
+    // ===== Pending shot execution =====
+
+    private void FirePendingShot()
+    {
+        if (_pendingShotKind == ShotKind.None) return;
+
+        Vector3 origin = fireOrigin.position;
+        Vector3 dir    = _pendingShotDir;
+        if (dir.sqrMagnitude < 1e-6f) dir = cannonPivot.forward;
+        if (flattenForward) { dir.y = 0f; if (dir.sqrMagnitude > 1e-6f) dir.Normalize(); }
+        origin += dir * startOffsetMeters;
+
+        if (_pendingShotKind == ShotKind.Stop)
+            UseStop(origin, dir, _pendingApplyDamage);
         else
-            UsePaper(origin, finalDir, applyDamage: shouldHit);
+            UsePaper(origin, dir, _pendingApplyDamage);
 
-        // Schedule the next (random) fire time regardless of hit/miss
-        ScheduleNextFire();
+        // Clear
+        _pendingShotKind = ShotKind.None;
     }
 
     // ===== Scheduling & Targeting =====
@@ -168,6 +239,7 @@ public class DefenseSkillAI : MonoBehaviour
 
     private DroneHealth FindNearestDrone()
     {
+        // If your Unity version doesn't support includeInactive, remove the argument.
         DroneHealth[] all = FindObjectsOfType<DroneHealth>(includeInactive: false);
         DroneHealth best = null;
         float bestSqr = float.PositiveInfinity;
@@ -189,24 +261,22 @@ public class DefenseSkillAI : MonoBehaviour
 
     // ===== Aim jitter =====
 
-    /// <summary>
-    /// Deviates 'dir' by up to 'degrees' within a cone. If yawOnly (flattenForward), rotates around Y for planar deviation.
-    /// </summary>
-    private static Vector3 JitterDirection(Vector3 dir, float degrees, bool yawOnly)
+    /// <summary> Deviates 'dir' by up to 'degrees'. If yawOnly, deviation is around Y. </summary>
+    private static Vector3 JitterDirection(Vector3 dir, float degrees, bool yawOnlyMode)
     {
-        if (degrees <= 0.001f) return dir;
+        if (degrees <= 0.001f || dir.sqrMagnitude < 1e-6f) return dir.normalized;
 
-        if (yawOnly)
+        if (yawOnlyMode)
         {
-            // Rotate around global up to keep horizontal shot
             float angle = Random.Range(-degrees, degrees);
-            return Quaternion.AngleAxis(angle, Vector3.up) * dir;
+            return (Quaternion.AngleAxis(angle, Vector3.up) * dir).normalized;
         }
         else
         {
-            // Rotate around a random perpendicular axis for a conical spread
-            Vector3 axis = Vector3.Cross(dir, Random.onUnitSphere);
-            if (axis.sqrMagnitude < 1e-6f) axis = Vector3.up; // fallback
+            // Conical spread: rotate around a random axis perpendicular to dir
+            Vector3 any = Random.onUnitSphere;
+            Vector3 axis = Vector3.Cross(dir, any);
+            if (axis.sqrMagnitude < 1e-6f) axis = Vector3.up;
             axis.Normalize();
             float angle = Random.Range(-degrees, degrees);
             return (Quaternion.AngleAxis(angle, axis) * dir).normalized;
@@ -248,19 +318,16 @@ public class DefenseSkillAI : MonoBehaviour
     private void UseStop(Vector3 origin, Vector3 dir, bool applyDamage)
     {
         _lastStopTime = Time.time;
-        
         if (dir.sqrMagnitude < 1e-6f) return;
         dir.Normalize();
 
         if (SphereRay(origin, dir, out RaycastHit hit))
         {
-            // Visual: spawn projectile from palm to hit point
             PlayStopProjectile(origin, hit.point, hit.collider);
 
         }
         else
         {
-            // Miss: fly straight to max range along the same (already-flattened) direction
             Vector3 end = origin + dir * maxRayDistance;
             PlayStopProjectile(origin, end, null);
         }
@@ -279,6 +346,7 @@ public class DefenseSkillAI : MonoBehaviour
     }
 
     // ===== Projectile (Stop) =====
+
     private void InitStopProjectilePool()
     {
         _stopProjectilePool = new Queue<GameObject>(Mathf.Max(1, stopProjectilePoolSize));
@@ -348,6 +416,7 @@ public class DefenseSkillAI : MonoBehaviour
     }
 
     // ===== Beam (Paper) =====
+
     private void InitBeamPool()
     {
         _beamPool = new Queue<LineRenderer>(beamPoolSize);
