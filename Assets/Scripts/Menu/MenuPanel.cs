@@ -4,28 +4,38 @@ using UnityEngine.UI;
 
 public class MenuPanel : MonoBehaviour
 {
+    //Online
+    [SerializeField] private ToggleGroup mutiplayerGroup;
+    [SerializeField] private Toggle[] mutiplayerToggles;
+
+    //mode
     [SerializeField] private ToggleGroup modeGroup;
     [SerializeField] private Toggle[] modeToggles;
 
     public void StartGame(int team)
     {
+        //team
         GlobalData.Instance.Team = (ETeam)team;
 
-        ToggleGroupUtils.EnsureOneOn(modeGroup);
+        //online mode
+        ToggleGroupUtils.EnsureOneOn(mutiplayerGroup);
+        int idxMuti = ToggleGroupUtils.GetSelectedIndex(mutiplayerGroup, mutiplayerToggles);
+        GlobalData.Instance.OnlineMode = (EOnlineMode)idxMuti;
 
-        // bool any = ToggleGroupUtils.AnyOn(modeGroup);                 // check any ON
-        // Toggle current = ToggleGroupUtils.GetSelected(modeGroup);     // get current ON
+        //game mode
+        ToggleGroupUtils.EnsureOneOn(modeGroup);
         int idx = ToggleGroupUtils.GetSelectedIndex(modeGroup, modeToggles);
-        switch (idx)
+        GlobalData.Instance.GameMode = (EGameMode)idx;
+
+
+        //Load scene
+        switch (GlobalData.Instance.OnlineMode)
         {
-            case 0:
-                SceneManager.LoadScene("GameAR");
+            case EOnlineMode.Offline:
+                SceneManager.LoadScene(GlobalData.Instance.GameMode.ToString());
                 break;
-            case 1:
-                SceneManager.LoadScene("GameMR");
-                break;
-            default:
-                SceneManager.LoadScene("GameAR");
+            case EOnlineMode.Online:
+                SceneManager.LoadScene("Lobby");
                 break;
         }
     }
